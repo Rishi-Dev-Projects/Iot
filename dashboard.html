@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>IoT Soil Moisture and Weather Monitoring Dashboard</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body class="bg-slate-900 text-white min-h-screen p-4 md:p-6 font-sans">
+
+    <!-- =====================================================
+         MAIN CONTAINER
+    ====================================================== -->
+
+    <div class="max-w-6xl mx-auto w-full bg-slate-800 rounded-2xl shadow-2xl p-5 md:p-8 border border-slate-700">
+
+        <!-- =================================================
+             PROJECT TITLE
+        ================================================== -->
+
+        <div class="text-center mb-8">
+
+            <h1 class="text-3xl md:text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400">
+                IoT Soil Moisture and Weather Monitoring Dashboard
+            </h1>
+
+            <p class="text-slate-400 mt-3" id="last-updated">
+                Waiting for sensor data...
+            </p>
+
+        </div>
+
+
+        <!-- =================================================
+             SENSOR CARDS
+        ================================================== -->
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+
+
+            <!-- TEMPERATURE CARD -->
+
+            <div class="bg-slate-700/50 rounded-xl p-6 border border-slate-600 flex flex-col items-center justify-center">
+
+                <div class="text-5xl mb-3">
+                    🌡️
+                </div>
+
+                <h2 class="text-slate-400 uppercase tracking-widest text-sm font-semibold mb-3">
+                    Temperature
+                </h2>
+
+                <div class="flex items-baseline space-x-1">
+
+                    <span id="temp-val" class="text-6xl font-black text-blue-400">
+                        --
+                    </span>
+
+                    <span class="text-2xl text-slate-500 font-bold">
+                        °C
+                    </span>
+
+                </div>
+
+            </div>
+
+
+            <!-- SOIL MOISTURE CARD -->
+
+            <div class="bg-slate-700/50 rounded-xl p-6 border border-slate-600 flex flex-col items-center justify-center">
+
+                <div class="text-5xl mb-3">
+                    🌱
+                </div>
+
+                <h2 class="text-slate-400 uppercase tracking-widest text-sm font-semibold mb-3">
+                    Soil Moisture
+                </h2>
+
+                <div class="flex items-baseline space-x-1">
+
+                    <span id="soil-val" class="text-6xl font-black text-green-400">
+                        --
+                    </span>
+
+                    <span class="text-2xl text-slate-500 font-bold">
+                        %
+                    </span>
+
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <!-- =================================================
+             SOIL CONDITION
+        ================================================== -->
+
+        <div id="soil-status-card"
+            class="mb-8 bg-slate-700/50 rounded-xl p-6 border border-slate-600 text-center">
+
+            <p class="text-slate-400 uppercase tracking-widest text-sm font-semibold mb-2">
+                Soil Condition
+            </p>
+
+            <p id="soil-status" class="text-2xl font-bold text-slate-300">
+                Waiting for sensor data...
+            </p>
+
+        </div>
+
+
+        <!-- =================================================
+             GRAPHS
+        ================================================== -->
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+
+            <!-- TEMPERATURE GRAPH -->
+
+            <div class="bg-slate-900/50 rounded-xl p-4 border border-slate-600">
+
+                <div class="h-80">
+
+                    <canvas id="tempChart"></canvas>
+
+                </div>
+
+            </div>
+
+
+            <!-- SOIL MOISTURE GRAPH -->
+
+            <div class="bg-slate-900/50 rounded-xl p-4 border border-slate-600">
+
+                <div class="h-80">
+
+                    <canvas id="soilChart"></canvas>
+
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <!-- =================================================
+             FOOTER
+        ================================================== -->
+
+        <div class="text-center mt-8 text-slate-500 text-sm">
+
+            ESP32 • DHT11 • Soil Moisture Sensor • ThingSpeak
+
+        </div>
+
+    </div>
+
+
+    <!-- =====================================================
+         JAVASCRIPT
+    ====================================================== -->
+
+    <script>
+
+
+        // =====================================================
+        // THINGSPEAK SETTINGS
+        // =====================================================
+
+        const CHANNEL_ID = '3456243';
+
+        const READ_API_KEY = 'GYS9G47VFLVZ6EUE';
+
+
+        // =====================================================
+        // THINGSPEAK API URL
+        // =====================================================
+
+        const URL =
+            `https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds.json?api_key=${READ_API_KEY}&results=1`;
+
+
+        // =====================================================
+        // VARIABLES
+        // =====================================================
+
+        let lastEntryId = null;
+
+        const MAX_DATA_POINTS = 30;
+
+
+        // =====================================================
+        // CHART COMMON SETTINGS
+        // =====================================================
+
+        const commonOptions = {
+
+            responsive: true,
+
+            maintainAspectRatio: false,
+
+            scales: {
+
+                x: {
+
+                    ticks: {
+                        color: '#94a3b8'
+                    },
+
+                    grid: {
+                        color: '#334155'
+                    }
+
+                },
+
+                y: {
+
+                    ticks: {
+                        color: '#94a3b8'
+                    },
+
+                    grid: {
+                        color: '#334155'
+                    }
+
+                }
+
+            },
+
+            plugins: {
+
+                legend: {
+                    display: false
+                }
+
+            },
+
+            animation: {
+                duration: 400
+            }
+
+        };
+
+
+        // =====================================================
+        // TEMPERATURE CHART
+        // =====================================================
+
+        const ctxTemp =
+            document
+                .getElementById('tempChart')
+                .getContext('2d');
+
+
+        const tempChart = new Chart(ctxTemp, {
+
+            type: 'line',
+
+            data: {
+
+                labels: [],
+
+                datasets: [{
+
+                    label: 'Temperature',
+
+                    borderColor: '#60a5fa',
+
+                    backgroundColor:
+                        'rgba(96, 165, 250, 0.12)',
+
+                    borderWidth: 3,
+
+                    pointRadius: 4,
+
+                    pointBackgroundColor: '#60a5fa',
+
+                    fill: true,
+
+                    tension: 0.3,
+
+                    data: []
+
+                }]
+
+            },
+
+            options: {
+
+                ...commonOptions,
+
+                plugins: {
+
+                    title: {
+
+                        display: true,
+
+                        text: '🌡️ Temperature Trend',
+
+                        color: '#94a3b8',
+
+                        font: {
+                            size: 17
+                        }
+
+                    },
+
+                    legend: {
+                        display: false
+                    }
+
+                }
+
+            }
+
+        });
+
+
+        // =====================================================
+        // SOIL MOISTURE CHART
+        // =====================================================
+
+        const ctxSoil =
+            document
+                .getElementById('soilChart')
+                .getContext('2d');
+
+
+        const soilChart = new Chart(ctxSoil, {
+
+            type: 'line',
+
+            data: {
+
+                labels: [],
+
+                datasets: [{
+
+                    label: 'Soil Moisture',
+
+                    borderColor: '#4ade80',
+
+                    backgroundColor:
+                        'rgba(74, 222, 128, 0.12)',
+
+                    borderWidth: 3,
+
+                    pointRadius: 4,
+
+                    pointBackgroundColor: '#4ade80',
+
+                    fill: true,
+
+                    tension: 0.3,
+
+                    data: []
+
+                }]
+
+            },
+
+            options: {
+
+                ...commonOptions,
+
+                scales: {
+
+                    x: {
+
+                        ticks: {
+                            color: '#94a3b8'
+                        },
+
+                        grid: {
+                            color: '#334155'
+                        }
+
+                    },
+
+                    y: {
+
+                        min: 0,
+
+                        max: 100,
+
+                        ticks: {
+                            color: '#94a3b8'
+                        },
+
+                        grid: {
+                            color: '#334155'
+                        }
+
+                    }
+
+                },
+
+                plugins: {
+
+                    title: {
+
+                        display: true,
+
+                        text: '🌱 Soil Moisture Trend',
+
+                        color: '#94a3b8',
+
+                        font: {
+                            size: 17
+                        }
+
+                    },
+
+                    legend: {
+                        display: false
+                    }
+
+                }
+
+            }
+
+        });
+
+
+        // =====================================================
+        // SOIL CONDITION FUNCTION
+        // =====================================================
+
+        function updateSoilStatus(soilMoisture)
+        {
+
+            const statusElement =
+                document.getElementById('soil-status');
+
+            const cardElement =
+                document.getElementById('soil-status-card');
+
+
+            // -------------------------------------------------
+            // DRY SOIL
+            // -------------------------------------------------
+
+            if (soilMoisture < 30)
+            {
+
+                statusElement.innerText =
+                    "⚠️ WATER REQUIRED";
+
+                statusElement.className =
+                    "text-2xl font-bold text-red-400";
+
+                cardElement.className =
+                    "mb-8 bg-red-900/20 rounded-xl p-6 border border-red-500/40 text-center";
+
+            }
+
+
+            // -------------------------------------------------
+            // MODERATE SOIL
+            // -------------------------------------------------
+
+            else if (soilMoisture < 60)
+            {
+
+                statusElement.innerText =
+                    "🟡 MOISTURE MODERATE";
+
+                statusElement.className =
+                    "text-2xl font-bold text-yellow-400";
+
+                cardElement.className =
+                    "mb-8 bg-yellow-900/20 rounded-xl p-6 border border-yellow-500/40 text-center";
+
+            }
+
+
+            // -------------------------------------------------
+            // MOIST SOIL
+            // -------------------------------------------------
+
+            else
+            {
+
+                statusElement.innerText =
+                    "🟢 SOIL MOIST";
+
+                statusElement.className =
+                    "text-2xl font-bold text-green-400";
+
+                cardElement.className =
+                    "mb-8 bg-green-900/20 rounded-xl p-6 border border-green-500/40 text-center";
+
+            }
+
+        }
+
+
+        // =====================================================
+        // FETCH SENSOR DATA FROM THINGSPEAK
+        // =====================================================
+
+        async function fetchSensorData()
+        {
+
+            try
+            {
+
+                const response =
+                    await fetch(URL);
+
+
+                // Check response
+
+                if (!response.ok)
+                {
+
+                    throw new Error(
+                        `HTTP Error: ${response.status}`
+                    );
+
+                }
+
+
+                // Convert response to JSON
+
+                const data =
+                    await response.json();
+
+
+                // Check if ThingSpeak has data
+
+                if (
+                    data.feeds &&
+                    data.feeds.length > 0
+                )
+                {
+
+                    const latestFeed =
+                        data.feeds[0];
+
+
+                    // -------------------------------------------------
+                    // CHECK FOR NEW DATA
+                    // -------------------------------------------------
+
+                    if (
+                        latestFeed.entry_id !==
+                        lastEntryId
+                    )
+                    {
+
+                        lastEntryId =
+                            latestFeed.entry_id;
+
+
+                        // =================================================
+                        // THINGSPEAK FIELD MAPPING
+                        // =================================================
+                        //
+                        // Field 1 = Temperature
+                        // Field 2 = Soil Moisture
+                        //
+                        // =================================================
+
+                        const temperature =
+                            parseFloat(
+                                latestFeed.field1
+                            );
+
+
+                        const soilMoisture =
+                            parseFloat(
+                                latestFeed.field2
+                            );
+
+
+                        // -------------------------------------------------
+                        // CHECK SENSOR VALUES
+                        // -------------------------------------------------
+
+                        if (
+                            isNaN(temperature) ||
+                            isNaN(soilMoisture)
+                        )
+                        {
+
+                            console.warn(
+                                "Invalid sensor data received."
+                            );
+
+                            return;
+
+                        }
+
+
+                        // =================================================
+                        // TIME
+                        // =================================================
+
+                        const timeString =
+                            new Date(
+                                latestFeed.created_at
+                            ).toLocaleTimeString();
+
+
+                        // =================================================
+                        // UPDATE TEMPERATURE VALUE
+                        // =================================================
+
+                        document.getElementById(
+                            'temp-val'
+                        ).innerText =
+                            temperature.toFixed(1);
+
+
+                        // =================================================
+                        // UPDATE SOIL MOISTURE VALUE
+                        // =================================================
+
+                        document.getElementById(
+                            'soil-val'
+                        ).innerText =
+                            soilMoisture.toFixed(0);
+
+
+                        // =================================================
+                        // UPDATE LAST UPDATED
+                        // =================================================
+
+                        document.getElementById(
+                            'last-updated'
+                        ).innerText =
+                            `🟢 Live • Last synchronized at ${timeString}`;
+
+
+                        // =================================================
+                        // UPDATE SOIL CONDITION
+                        // =================================================
+
+                        updateSoilStatus(
+                            soilMoisture
+                        );
+
+
+                        // =================================================
+                        // ADD TEMPERATURE TO GRAPH
+                        // =================================================
+
+                        tempChart.data.labels.push(
+                            timeString
+                        );
+
+                        tempChart.data.datasets[0]
+                            .data.push(
+                                temperature
+                            );
+
+
+                        // =================================================
+                        // ADD SOIL MOISTURE TO GRAPH
+                        // =================================================
+
+                        soilChart.data.labels.push(
+                            timeString
+                        );
+
+                        soilChart.data.datasets[0]
+                            .data.push(
+                                soilMoisture
+                            );
+
+
+                        // =================================================
+                        // LIMIT GRAPH TO 30 POINTS
+                        // =================================================
+
+                        if (
+                            tempChart.data.labels.length >
+                            MAX_DATA_POINTS
+                        )
+                        {
+
+                            tempChart.data.labels.shift();
+
+                            tempChart.data.datasets[0]
+                                .data.shift();
+
+
+                            soilChart.data.labels.shift();
+
+                            soilChart.data.datasets[0]
+                                .data.shift();
+
+                        }
+
+
+                        // =================================================
+                        // UPDATE CHARTS
+                        // =================================================
+
+                        tempChart.update();
+
+                        soilChart.update();
+
+                    }
+
+                }
+
+            }
+
+
+            // =====================================================
+            // ERROR HANDLING
+            // =====================================================
+
+            catch (error)
+            {
+
+                console.error(
+                    "ThingSpeak Error:",
+                    error
+                );
+
+
+                document.getElementById(
+                    'last-updated'
+                ).innerText =
+                    "🔴 Connection warning: Retrying...";
+
+            }
+
+        }
+
+
+        // =====================================================
+        // INITIAL DATA FETCH
+        // =====================================================
+
+        fetchSensorData();
+
+
+        // =====================================================
+        // UPDATE EVERY 20 SECONDS
+        // =====================================================
+
+        setInterval(
+            fetchSensorData,
+            20000
+        );
+
+
+    </script>
+
+</body>
+
+</html>
